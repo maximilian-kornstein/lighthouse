@@ -157,9 +157,11 @@ pub static PAYLOAD_ATTESTATION_SERVICE_TIMES: LazyLock<Result<HistogramVec>> =
         )
     });
 pub static SLASHING_PROTECTION_PRUNE_TIMES: LazyLock<Result<Histogram>> = LazyLock::new(|| {
-    try_create_histogram(
+    try_create_histogram_with_buckets(
         "vc_slashing_protection_prune_times_seconds",
         "Time required to prune the slashing protection DB",
+        // The first prune of a large DB can take several minutes.
+        decimal_buckets(-2, 3),
     )
 });
 pub static BLOCK_SERVICE_TIMES: LazyLock<Result<HistogramVec>> = LazyLock::new(|| {
@@ -297,3 +299,35 @@ pub static VC_BEACON_NODE_LATENCY_PRIMARY_ENDPOINT: LazyLock<Result<Histogram>> 
             "Round-trip latency for the primary BN endpoint",
         )
     });
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn histogram_bucket_bounds(name: &str) -> Vec<f64> {
+        let family = gather()
+            .into_iter()
+            .find(|family| family.get_name() == name)
+            .unwrap_or_else(|| panic!("{name} should be registered"));
+        family.get_metric()[0]
+            .get_histogram()
+            .get_bucket()
+            .iter()
+            .map(|bucket| bucket.get_upper_bound())
+            .collect()
+    }
+
+    #[test]
+    fn slashing_protection_prune_histogram_covers_long_prunes() {
+        assert!(SLASHING_PROTECTION_PRUNE_TIMES.is_ok());
+
+        let name = "vc_slashing_protection_prune_times_seconds";
+        let bounds = histogram_bucket_bounds(name);
+        assert_ne!(bounds, DEFAULT_BUCKETS, "{name} uses the default buckets");
+        // The first prune of a large slashing protection DB can take several minutes.
+        assert!(
+            bounds.last().is_some_and(|top| *top >= 600.0),
+            "{name} buckets {bounds:?} stop below 10 minutes"
+        );
+    }
+}
