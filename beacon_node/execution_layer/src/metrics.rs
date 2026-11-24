@@ -38,9 +38,13 @@ pub static EXECUTION_LAYER_REQUEST_TIMES: LazyLock<Result<HistogramVec>> = LazyL
 });
 pub static EXECUTION_LAYER_PAYLOAD_ATTRIBUTES_LOOKAHEAD: LazyLock<Result<Histogram>> =
     LazyLock::new(|| {
-        try_create_histogram(
+        try_create_histogram_with_buckets(
             "execution_layer_payload_attributes_lookahead",
             "Duration between an fcU call with PayloadAttributes and when the block should be produced",
+            // The payload is for the next slot, so the lookahead is at most 12s on mainnet.
+            Ok(vec![
+                0.1, 0.25, 0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0,
+            ]),
         )
     });
 pub static EXECUTION_LAYER_PRE_PREPARED_PAYLOAD_ID: LazyLock<Result<IntCounterVec>> = LazyLock::new(
@@ -130,6 +134,38 @@ pub fn expose_execution_layer_info(els: &Vec<crate::ClientVersionV1>) {
                 &el.commit.to_string(),
             ],
             1,
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn histogram_bucket_bounds(name: &str) -> Vec<f64> {
+        let family = gather()
+            .into_iter()
+            .find(|family| family.get_name() == name)
+            .unwrap_or_else(|| panic!("{name} should be registered"));
+        family.get_metric()[0]
+            .get_histogram()
+            .get_bucket()
+            .iter()
+            .map(|bucket| bucket.get_upper_bound())
+            .collect()
+    }
+
+    #[test]
+    fn payload_attributes_lookahead_histogram_covers_a_slot() {
+        assert!(EXECUTION_LAYER_PAYLOAD_ATTRIBUTES_LOOKAHEAD.is_ok());
+
+        let name = "execution_layer_payload_attributes_lookahead";
+        let bounds = histogram_bucket_bounds(name);
+        assert_ne!(bounds, DEFAULT_BUCKETS, "{name} uses the default buckets");
+        // The lookahead is at most one slot, 12s on mainnet.
+        assert!(
+            bounds.last().is_some_and(|top| *top >= 12.0),
+            "{name} buckets {bounds:?} stop within one slot"
         );
     }
 }

@@ -25,9 +25,13 @@ pub static HTTP_API_PATHS_TIMES: LazyLock<Result<HistogramVec>> = LazyLock::new(
 
 pub static HTTP_API_BLOCK_BROADCAST_DELAY_TIMES: LazyLock<Result<HistogramVec>> =
     LazyLock::new(|| {
-        try_create_histogram_vec(
+        try_create_histogram_vec_with_buckets(
             "http_api_block_broadcast_delay_times",
             "Time between start of the slot and when the block completed broadcast and processing",
+            // Resolves the 4s attestation deadline and covers blocks up to two mainnet slots late.
+            Ok(vec![
+                0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0, 24.0,
+            ]),
             &["provenance"],
         )
     });
@@ -57,3 +61,40 @@ pub static INCLUSION_LISTS_PUBLISHED_TOTAL: LazyLock<Result<IntCounter>> = LazyL
         "Total number of published inclusion lists",
     )
 });
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn histogram_bucket_bounds(name: &str) -> Vec<f64> {
+        let family = gather()
+            .into_iter()
+            .find(|family| family.get_name() == name)
+            .unwrap_or_else(|| panic!("{name} should be registered"));
+        family.get_metric()[0]
+            .get_histogram()
+            .get_bucket()
+            .iter()
+            .map(|bucket| bucket.get_upper_bound())
+            .collect()
+    }
+
+    #[test]
+    fn block_broadcast_delay_histogram_covers_late_blocks() {
+        // A `HistogramVec` is only gathered once it has a child.
+        assert!(get_histogram(&HTTP_API_BLOCK_BROADCAST_DELAY_TIMES, &["provenance"]).is_some());
+
+        let name = "http_api_block_broadcast_delay_times";
+        let bounds = histogram_bucket_bounds(name);
+        assert_ne!(bounds, DEFAULT_BUCKETS, "{name} uses the default buckets");
+        // 4s is the mainnet attestation deadline and 12s is one mainnet slot.
+        assert!(
+            bounds.contains(&4.0),
+            "{name} buckets {bounds:?} have no 4s bound"
+        );
+        assert!(
+            bounds.last().is_some_and(|top| *top > 12.0),
+            "{name} buckets {bounds:?} stop within one slot"
+        );
+    }
+}
