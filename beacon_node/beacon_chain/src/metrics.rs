@@ -7,6 +7,12 @@ use slot_clock::SlotClock;
 use std::sync::LazyLock;
 use types::{BeaconState, Epoch, EthSpec, Hash256, Slot};
 
+/// Buckets for delays measured from the start of a slot or from a message's due time. They resolve
+/// the 4s and 8s mainnet deadlines and extend to two mainnet slots so late messages stay visible.
+const SLOT_DELAY_BUCKETS: &[f64] = &[
+    0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0, 24.0,
+];
+
 // Attestation simulator metrics
 pub const VALIDATOR_MONITOR_ATTESTATION_SIMULATOR_HEAD_ATTESTER_HIT_TOTAL: &str =
     "validator_monitor_attestation_simulator_head_attester_hit_total";
@@ -287,9 +293,10 @@ pub static OPERATIONS_PER_BLOCK_ATTESTATION: LazyLock<Result<Histogram>> = LazyL
     try_create_histogram_with_buckets(
         "beacon_operations_per_block_attestation_total",
         "Number of attestations in a block",
-        // Full block is 128.
+        // `MAX_ATTESTATIONS_ELECTRA` is 8; before Electra a full block had 128.
         Ok(vec![
-            0_f64, 1_f64, 3_f64, 15_f64, 31_f64, 63_f64, 127_f64, 255_f64,
+            0_f64, 1_f64, 2_f64, 3_f64, 4_f64, 5_f64, 6_f64, 7_f64, 8_f64, 16_f64, 32_f64, 64_f64,
+            128_f64,
         ]),
     )
 });
@@ -1107,9 +1114,10 @@ pub static VALIDATOR_MONITOR_PREV_EPOCH_ATTESTATIONS_TOTAL: LazyLock<Result<IntG
 pub static VALIDATOR_MONITOR_PREV_EPOCH_ATTESTATIONS_MIN_DELAY_SECONDS: LazyLock<
     Result<HistogramVec>,
 > = LazyLock::new(|| {
-    try_create_histogram_vec(
+    try_create_histogram_vec_with_buckets(
         "validator_monitor_prev_epoch_attestations_min_delay_seconds",
         "The min delay between when the validator should send the attestation and when it was received.",
+        Ok(SLOT_DELAY_BUCKETS.to_vec()),
         &["validator"],
     )
 });
@@ -1151,9 +1159,10 @@ pub static VALIDATOR_MONITOR_PREV_EPOCH_BEACON_BLOCKS_TOTAL: LazyLock<Result<Int
 pub static VALIDATOR_MONITOR_PREV_EPOCH_BEACON_BLOCKS_MIN_DELAY_SECONDS: LazyLock<
     Result<HistogramVec>,
 > = LazyLock::new(|| {
-    try_create_histogram_vec(
+    try_create_histogram_vec_with_buckets(
         "validator_monitor_prev_epoch_beacon_blocks_min_delay_seconds",
         "The min delay between when the validator should send the block and when it was received.",
+        Ok(SLOT_DELAY_BUCKETS.to_vec()),
         &["validator"],
     )
 });
@@ -1168,9 +1177,10 @@ pub static VALIDATOR_MONITOR_PREV_EPOCH_AGGREGATES_TOTAL: LazyLock<Result<IntGau
 pub static VALIDATOR_MONITOR_PREV_EPOCH_AGGREGATES_MIN_DELAY_SECONDS: LazyLock<
     Result<HistogramVec>,
 > = LazyLock::new(|| {
-    try_create_histogram_vec(
+    try_create_histogram_vec_with_buckets(
         "validator_monitor_prev_epoch_aggregates_min_delay_seconds",
         "The min delay between when the validator should send the aggregate and when it was received.",
+        Ok(SLOT_DELAY_BUCKETS.to_vec()),
         &["validator"],
     )
 });
@@ -1210,9 +1220,10 @@ pub static VALIDATOR_MONITOR_PREV_EPOCH_SYNC_COMMITTEE_MESSAGES_TOTAL: LazyLock<
 pub static VALIDATOR_MONITOR_PREV_EPOCH_SYNC_COMMITTEE_MESSAGES_MIN_DELAY_SECONDS: LazyLock<
     Result<HistogramVec>,
 > = LazyLock::new(|| {
-    try_create_histogram_vec(
+    try_create_histogram_vec_with_buckets(
         "validator_monitor_prev_epoch_sync_committee_messages_min_delay_seconds",
         "The min delay between when the validator should send the sync committee message and when it was received.",
+        Ok(SLOT_DELAY_BUCKETS.to_vec()),
         &["validator"],
     )
 });
@@ -1245,9 +1256,10 @@ pub static VALIDATOR_MONITOR_PREV_EPOCH_SYNC_CONTRIBUTIONS_TOTAL: LazyLock<Resul
 pub static VALIDATOR_MONITOR_PREV_EPOCH_SYNC_CONTRIBUTION_MIN_DELAY_SECONDS: LazyLock<
     Result<HistogramVec>,
 > = LazyLock::new(|| {
-    try_create_histogram_vec(
+    try_create_histogram_vec_with_buckets(
         "validator_monitor_prev_epoch_sync_contribution_min_delay_seconds",
         "The min delay between when the validator should send the sync contribution and when it was received.",
+        Ok(SLOT_DELAY_BUCKETS.to_vec()),
         &["validator"],
     )
 });
@@ -1280,9 +1292,10 @@ pub static VALIDATOR_MONITOR_UNAGGREGATED_ATTESTATION_TOTAL: LazyLock<Result<Int
 pub static VALIDATOR_MONITOR_UNAGGREGATED_ATTESTATION_DELAY_SECONDS: LazyLock<
     Result<HistogramVec>,
 > = LazyLock::new(|| {
-    try_create_histogram_vec(
+    try_create_histogram_vec_with_buckets(
         "validator_monitor_unaggregated_attestation_delay_seconds",
         "The delay between when the validator sent the attestation and the start of the slot.",
+        Ok(SLOT_DELAY_BUCKETS.to_vec()),
         &["src", "validator"],
     )
 });
@@ -1296,9 +1309,10 @@ pub static VALIDATOR_MONITOR_SYNC_COMMITTEE_MESSAGES_TOTAL: LazyLock<Result<IntC
     });
 pub static VALIDATOR_MONITOR_SYNC_COMMITTEE_MESSAGES_DELAY_SECONDS: LazyLock<Result<HistogramVec>> =
     LazyLock::new(|| {
-        try_create_histogram_vec(
+        try_create_histogram_vec_with_buckets(
             "validator_monitor_sync_committee_messages_delay_seconds",
             "The delay between when the validator should send the sync committee message and when it was received.",
+            Ok(SLOT_DELAY_BUCKETS.to_vec()),
             &["src", "validator"],
         )
     });
@@ -1312,9 +1326,10 @@ pub static VALIDATOR_MONITOR_SYNC_CONTRIBUTIONS_TOTAL: LazyLock<Result<IntCounte
     });
 pub static VALIDATOR_MONITOR_SYNC_CONTRIBUTIONS_DELAY_SECONDS: LazyLock<Result<HistogramVec>> =
     LazyLock::new(|| {
-        try_create_histogram_vec(
+        try_create_histogram_vec_with_buckets(
             "validator_monitor_sync_contributions_delay_seconds",
             "The delay between when the aggregator should send the sync contribution and when it was received.",
+            Ok(SLOT_DELAY_BUCKETS.to_vec()),
             &["src", "validator"],
         )
     });
@@ -1328,9 +1343,10 @@ pub static VALIDATOR_MONITOR_AGGREGATED_ATTESTATION_TOTAL: LazyLock<Result<IntCo
     });
 pub static VALIDATOR_MONITOR_AGGREGATED_ATTESTATION_DELAY_SECONDS: LazyLock<Result<HistogramVec>> =
     LazyLock::new(|| {
-        try_create_histogram_vec(
+        try_create_histogram_vec_with_buckets(
             "validator_monitor_aggregated_attestation_delay_seconds",
             "The delay between then the validator should send the aggregate and when it was received.",
+            Ok(SLOT_DELAY_BUCKETS.to_vec()),
             &["src", "validator"],
         )
     });
@@ -1354,9 +1370,10 @@ pub static VALIDATOR_MONITOR_SYNC_COMMITTEE_MESSAGE_IN_CONTRIBUTION_TOTAL: LazyL
 pub static VALIDATOR_MONITOR_ATTESTATION_IN_AGGREGATE_DELAY_SECONDS: LazyLock<
     Result<HistogramVec>,
 > = LazyLock::new(|| {
-    try_create_histogram_vec(
+    try_create_histogram_vec_with_buckets(
         "validator_monitor_attestation_in_aggregate_delay_seconds",
         "The delay between when the validator should send the aggregate and when it was received.",
+        Ok(SLOT_DELAY_BUCKETS.to_vec()),
         &["src", "validator"],
     )
 });
@@ -1395,9 +1412,10 @@ pub static VALIDATOR_MONITOR_BEACON_BLOCK_TOTAL: LazyLock<Result<IntCounterVec>>
     });
 pub static VALIDATOR_MONITOR_BEACON_BLOCK_DELAY_SECONDS: LazyLock<Result<HistogramVec>> =
     LazyLock::new(|| {
-        try_create_histogram_vec(
+        try_create_histogram_vec_with_buckets(
             "validator_monitor_beacon_block_delay_seconds",
             "The delay between when the validator should send the block and when it was received.",
+            Ok(SLOT_DELAY_BUCKETS.to_vec()),
             &["src", "validator"],
         )
     });
@@ -2485,4 +2503,117 @@ fn set_gauge_by_usize(gauge: &Result<IntGauge>, value: usize) {
 
 fn set_gauge_by_u64(gauge: &Result<IntGauge>, value: u64) {
     set_gauge(gauge, value as i64);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn histogram_bucket_bounds(name: &str) -> Vec<f64> {
+        let family = gather()
+            .into_iter()
+            .find(|family| family.get_name() == name)
+            .unwrap_or_else(|| panic!("{name} should be registered"));
+        family.get_metric()[0]
+            .get_histogram()
+            .get_bucket()
+            .iter()
+            .map(|bucket| bucket.get_upper_bound())
+            .collect()
+    }
+
+    fn assert_slot_delay_buckets(
+        histogram_vec: &LazyLock<Result<HistogramVec>>,
+        name: &str,
+        labels: &[&str],
+    ) {
+        // A `HistogramVec` is only gathered once it has a child.
+        assert!(get_histogram(histogram_vec, labels).is_some());
+
+        let bounds = histogram_bucket_bounds(name);
+        assert_ne!(bounds, DEFAULT_BUCKETS, "{name} uses the default buckets");
+        // 4s is the mainnet attestation deadline and 12s is one mainnet slot.
+        assert!(
+            bounds.contains(&4.0),
+            "{name} buckets {bounds:?} have no 4s bound"
+        );
+        assert!(
+            bounds.last().is_some_and(|top| *top > 12.0),
+            "{name} buckets {bounds:?} stop within one slot"
+        );
+    }
+
+    #[test]
+    fn validator_monitor_delay_histograms_cover_late_messages() {
+        for (histogram_vec, name) in [
+            (
+                &VALIDATOR_MONITOR_PREV_EPOCH_ATTESTATIONS_MIN_DELAY_SECONDS,
+                "validator_monitor_prev_epoch_attestations_min_delay_seconds",
+            ),
+            (
+                &VALIDATOR_MONITOR_PREV_EPOCH_BEACON_BLOCKS_MIN_DELAY_SECONDS,
+                "validator_monitor_prev_epoch_beacon_blocks_min_delay_seconds",
+            ),
+            (
+                &VALIDATOR_MONITOR_PREV_EPOCH_AGGREGATES_MIN_DELAY_SECONDS,
+                "validator_monitor_prev_epoch_aggregates_min_delay_seconds",
+            ),
+            (
+                &VALIDATOR_MONITOR_PREV_EPOCH_SYNC_COMMITTEE_MESSAGES_MIN_DELAY_SECONDS,
+                "validator_monitor_prev_epoch_sync_committee_messages_min_delay_seconds",
+            ),
+            (
+                &VALIDATOR_MONITOR_PREV_EPOCH_SYNC_CONTRIBUTION_MIN_DELAY_SECONDS,
+                "validator_monitor_prev_epoch_sync_contribution_min_delay_seconds",
+            ),
+        ] {
+            assert_slot_delay_buckets(histogram_vec, name, &["validator"]);
+        }
+
+        for (histogram_vec, name) in [
+            (
+                &VALIDATOR_MONITOR_UNAGGREGATED_ATTESTATION_DELAY_SECONDS,
+                "validator_monitor_unaggregated_attestation_delay_seconds",
+            ),
+            (
+                &VALIDATOR_MONITOR_SYNC_COMMITTEE_MESSAGES_DELAY_SECONDS,
+                "validator_monitor_sync_committee_messages_delay_seconds",
+            ),
+            (
+                &VALIDATOR_MONITOR_SYNC_CONTRIBUTIONS_DELAY_SECONDS,
+                "validator_monitor_sync_contributions_delay_seconds",
+            ),
+            (
+                &VALIDATOR_MONITOR_AGGREGATED_ATTESTATION_DELAY_SECONDS,
+                "validator_monitor_aggregated_attestation_delay_seconds",
+            ),
+            (
+                &VALIDATOR_MONITOR_ATTESTATION_IN_AGGREGATE_DELAY_SECONDS,
+                "validator_monitor_attestation_in_aggregate_delay_seconds",
+            ),
+            (
+                &VALIDATOR_MONITOR_BEACON_BLOCK_DELAY_SECONDS,
+                "validator_monitor_beacon_block_delay_seconds",
+            ),
+        ] {
+            assert_slot_delay_buckets(histogram_vec, name, &["src", "validator"]);
+        }
+    }
+
+    #[test]
+    fn attestations_per_block_histogram_resolves_electra_blocks() {
+        assert!(OPERATIONS_PER_BLOCK_ATTESTATION.is_ok());
+
+        let bounds = histogram_bucket_bounds("beacon_operations_per_block_attestation_total");
+        for count in 0..=8 {
+            assert!(
+                bounds.contains(&f64::from(count)),
+                "no bucket for {count} attestations in {bounds:?}"
+            );
+        }
+        assert!(
+            bounds.last().is_some_and(|top| *top >= 128.0),
+            "buckets {bounds:?} stop below the pre-Electra maximum of 128"
+        );
+    }
 }
