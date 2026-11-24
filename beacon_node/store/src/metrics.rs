@@ -98,9 +98,11 @@ pub static DISK_DB_DELETE_COUNT: LazyLock<Result<IntCounterVec>> = LazyLock::new
     )
 });
 pub static DISK_DB_COMPACT_TIMES: LazyLock<Result<Histogram>> = LazyLock::new(|| {
-    try_create_histogram(
+    try_create_histogram_with_buckets(
         "store_disk_db_compact_seconds",
         "Time taken to run compaction on the DB.",
+        // A full compaction of a mainnet DB can take many minutes.
+        decimal_buckets(-1, 3),
     )
 });
 pub static DISK_DB_TYPE: LazyLock<Result<IntCounterVec>> = LazyLock::new(|| {
@@ -389,9 +391,11 @@ pub static STORE_BEACON_REPLAY_HOT_BLOCKS_TIME: LazyLock<Result<Histogram>> = La
     )
 });
 pub static STORE_BEACON_RECONSTRUCTION_TIME: LazyLock<Result<Histogram>> = LazyLock::new(|| {
-    try_create_histogram(
+    try_create_histogram_with_buckets(
         "store_beacon_reconstruction_time_seconds",
         "Time taken to run a reconstruct historic states batch",
+        // The migrator reconstructs 1024 slots per batch, which can take minutes.
+        decimal_buckets(-1, 3),
     )
 });
 pub static BEACON_DATA_COLUMNS_CACHE_HIT_COUNT: LazyLock<Result<IntCounter>> =
@@ -408,4 +412,42 @@ pub fn scrape_for_metrics(db_path: &Path, freezer_db_path: &Path) {
     set_gauge(&DISK_DB_SIZE, db_size as i64);
     let freezer_db_size = size_of_dir(freezer_db_path);
     set_gauge(&FREEZER_DB_SIZE, freezer_db_size as i64);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn histogram_bucket_bounds(name: &str) -> Vec<f64> {
+        let family = gather()
+            .into_iter()
+            .find(|family| family.get_name() == name)
+            .unwrap_or_else(|| panic!("{name} should be registered"));
+        family.get_metric()[0]
+            .get_histogram()
+            .get_bucket()
+            .iter()
+            .map(|bucket| bucket.get_upper_bound())
+            .collect()
+    }
+
+    #[test]
+    fn long_running_histograms_have_long_buckets() {
+        assert!(DISK_DB_COMPACT_TIMES.is_ok());
+        assert!(STORE_BEACON_RECONSTRUCTION_TIME.is_ok());
+
+        // Full compactions of a mainnet DB and 1024-slot reconstruction batches can run for many
+        // minutes.
+        for (name, min_top_bucket) in [
+            ("store_disk_db_compact_seconds", 1800.0),
+            ("store_beacon_reconstruction_time_seconds", 600.0),
+        ] {
+            let bounds = histogram_bucket_bounds(name);
+            assert_ne!(bounds, DEFAULT_BUCKETS, "{name} uses the default buckets");
+            assert!(
+                bounds.last().is_some_and(|top| *top >= min_top_bucket),
+                "{name} buckets {bounds:?} stop below {min_top_bucket}s"
+            );
+        }
+    }
 }
